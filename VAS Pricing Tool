@@ -1,0 +1,65 @@
+### PACKAGES AND DATA
+import json
+import numpy
+import pandas as pd
+import numpy as np
+from urllib.request import urlopen
+import yfinance as yf
+
+### 1) PULLING ETF DATA (VAS)
+url = "https://www.vanguard.com.au/adviser/api/data/broker-basket/download-file/8205/5?limit=undefined"
+response = urlopen(url)
+data_json = json.loads(response.read())
+sheet_one_data = data_json['data']['sheetOneJson']
+etf_data = [x for x in sheet_one_data if x] ## removes blank entries
+pcf = pd.DataFrame(etf_data)
+pcf.columns = ['cusip','ticker','full_name','quantity']
+pcf.to_csv('final')
+
+
+### 2) PREPARING EXCEL FILE
+companies = pd.read_csv('ASX300.csv',header=None)
+companies[('Use_Ticker')] = companies[0].apply(lambda x: x + str('.AX'))
+companies['live_px'] = None
+
+## 3) LIVE STOCK PRICES YAHOO FINANCE API
+# PULLING DATA IN BATCHES
+batch_size = 50
+symbol_batches = [companies['Use_Ticker'][i:i+batch_size] for i in range(0, len(companies), batch_size)]
+# Fetch data for each batch
+for symbols in symbol_batches:
+    tickers = " ".join(symbols)
+    data = yf.download(tickers, period="1d")  # Adjust period as needed
+    for symbol in symbols:
+        last_quote = data['Close'][symbol].iloc[-1]
+        companies.loc[companies['Use_Ticker'] == symbol, 'live_px'] = last_quote
+companies.to_csv('ASX_300_Priced')
+stocks = pd.read_csv('ASX_300_Priced')
+stocks.columns = ['index','ticker','exchange_ticker','price']
+
+## 4) DERIVE ETF PRICE
+## Finding Estimated Cash Amount & Creation UNIT SIZE
+est_cash = np.where(pcf == "Estimated Cash")
+est_cash_x = (est_cash[0])
+est_cash_y = (est_cash[1]+1)
+est_cash_x = numpy.squeeze(est_cash_x)
+est_cash_y = numpy.squeeze(est_cash_y)
+est_cash = pcf.iloc[est_cash_x].iloc[est_cash_y]
+est_cash = float(est_cash.replace(",", ""))
+
+creation_units = np.where(pcf == "Creation units")
+creation_units_x = (creation_units[0])
+creation_units_y = (creation_units[1]+1)
+creation_units_x = numpy.squeeze(creation_units_x)
+creation_units_y = numpy.squeeze(creation_units_y)
+creation_units = pcf.iloc[creation_units_x].iloc[creation_units_y]
+creation_units = float(creation_units.replace(",", ""))
+
+## Merging Dataframes & Calculating INAV
+merged_etf = pd.merge(stocks,pcf,on= ['ticker'],how ="left")
+merged_etf.dropna(subset=['quantity'],how='any',inplace=True)
+merged_etf['quantity'] = merged_etf['quantity'].apply(lambda x: float(x.replace(",","")))
+merged_etf['equity_capital'] = merged_etf['price']*merged_etf['quantity']
+merged_etf.to_csv('inspect')
+iNAV = sum(merged_etf['equity_capital'], est_cash)/creation_units
+print(f' The INAV is 'iNAV'')
