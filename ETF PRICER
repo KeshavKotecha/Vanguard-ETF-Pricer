@@ -1,0 +1,77 @@
+### FIND URLS USING FIDDLER DEBUGGING TOOL
+ETF_urls = {
+    "VAS": "https://www.vanguard.com.au/adviser/api/data/broker-basket/download-file/8205/5?limit=undefined",
+    "VAP": "https://www.vanguard.com.au/adviser/api/data/broker-basket/download-file/8206/5?limit=undefined",
+    "VLC": "https://www.vanguard.com.au/adviser/api/data/broker-basket/download-file/8209/5?limit=undefined",
+    "VHY": "https://www.vanguard.com.au/adviser/api/data/broker-basket/download-file/8210/5?limit=undefined",
+    "VETH": "https://www.vanguard.com.au/adviser/api/data/broker-basket/download-file/8226/5?limit=undefined"
+}
+
+### PACKAGES AND DATA
+import json
+import numpy
+import pandas as pd
+import numpy as np
+from urllib.request import urlopen
+import yfinance as yf
+
+### PULL LIVE STOCK PRICES FOR ALL STOCKS IN ASX
+companies = pd.read_csv('ASX300.csv',header=None)
+companies[('Use_Ticker')] = companies[0].apply(lambda x: x + str('.AX'))
+companies['live_px'] = None
+
+### PULLING DATA IN BATCHES
+batch_size = 50
+symbol_batches = [companies['Use_Ticker'][i:i+batch_size] for i in range(0, len(companies), batch_size)]
+# Fetch data for each batch
+for symbols in symbol_batches:
+    tickers = " ".join(symbols)
+    data = yf.download(tickers, period="1d")  # Adjust period as needed
+    for symbol in symbols:
+        last_quote = data['Close'][symbol].iloc[-1]
+        companies.loc[companies['Use_Ticker'] == symbol, 'live_px'] = last_quote
+companies.to_csv('ASX_300_Priced')
+stocks = pd.read_csv('ASX_300_Priced')
+stocks.columns = ['index','ticker','exchange_ticker','price']
+
+pcf_list = {}
+for key in ETF_urls:
+    url = ETF_urls[key]
+    response = urlopen(url)
+    data_json = json.loads(response.read())
+    sheet_one_data = data_json['data']['sheetOneJson']
+    etf_data = [x for x in sheet_one_data if x] ## removes blank entries
+    pcf_list[key] = pd.DataFrame(etf_data)
+    pcf_list[key].columns = ['cusip','ticker','full_name','quantity']
+
+def find_etf_factors(pcf,output):
+    input = np.where(pcf == output)
+    input_x = (input[0])
+    input_y = (input[1] + 1)
+    input_x = numpy.squeeze(input_x)
+    input_y = numpy.squeeze(input_y)
+    input = pcf.iloc[input_x].iloc[input_y]
+    input = float(input.replace(",", ""))
+    return input
+
+pcf_unit_data= {}
+pcf_cash_data = {}
+for name in pcf_list:
+    value = pcf_list[name]
+    pcf_cash_data[name] = find_etf_factors(value,"Estimated Cash")
+    pcf_unit_data[name] = find_etf_factors(value,"Creation units")
+
+def calc_etf_inav(pcf,est_cash,creation_units):
+    merged_etf = pd.merge(stocks,pcf,on= ['ticker'],how ="left")
+    merged_etf.dropna(subset=['quantity'],how='any',inplace=True)
+    merged_etf['quantity'] = merged_etf['quantity'].apply(lambda x: float(x.replace(",","")))
+    merged_etf['equity_capital'] = merged_etf['price']*merged_etf['quantity']
+    merged_etf.dropna(subset=['equity_capital'],inplace=True)
+    iNAV = sum(merged_etf['equity_capital'], est_cash)/creation_units
+    return iNAV
+
+for key, pcf_value in pcf_list.items():
+    est_cash_value = pcf_cash_data[key]
+    est_unit_value = pcf_unit_data[key]
+    inav_value = calc_etf_inav(pcf_value,est_cash_value,est_unit_value)
+    print(f'The INAV for {key} is {inav_value}')
