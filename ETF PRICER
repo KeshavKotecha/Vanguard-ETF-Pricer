@@ -56,11 +56,6 @@ def find_etf_factors(pcf,output):
     input = float(input.replace(",", ""))
     return input
 
-for name in pcf_list:
-    value = pcf_list[name]
-    pcf_cash_data[name] = find_etf_factors(value,"Estimated Cash")
-    pcf_unit_data[name] = find_etf_factors(value,"Creation units")
-
 def calc_etf_inav(pcf,est_cash,creation_units):
     merged_etf = pd.merge(stocks,pcf,on= ['ticker'],how ="left")
     merged_etf.dropna(subset=['quantity'],how='any',inplace=True)
@@ -69,6 +64,11 @@ def calc_etf_inav(pcf,est_cash,creation_units):
     merged_etf.dropna(subset=['equity_capital'],inplace=True)
     iNAV = sum(merged_etf['equity_capital'], est_cash)/creation_units
     return iNAV
+
+for name in pcf_list:
+    value = pcf_list[name]
+    pcf_cash_data[name] = find_etf_factors(value,"Estimated Cash")
+    pcf_unit_data[name] = find_etf_factors(value,"Creation units")
 
 for key, pcf_value in pcf_list.items():
     est_cash_value = pcf_cash_data[key]
